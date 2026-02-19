@@ -1,5 +1,21 @@
 // Mock Prisma and Stripe before loading the app
 jest.mock('../src/db', () => ({
+  $transaction: jest.fn(async (fn) => fn({
+    product: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    order: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
+  })),
   product: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
@@ -9,6 +25,7 @@ jest.mock('../src/db', () => ({
   },
   order: {
     create: jest.fn(),
+    findMany: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),

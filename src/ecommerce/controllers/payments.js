@@ -131,25 +131,27 @@ async function handleWebhook(req, res) {
         const orderId = session.metadata?.orderId;
         if (!orderId) break;
 
-        await prisma.order.update({
-          where: { id: orderId },
-          data: {
-            status: 'PAID',
-            stripePaymentIntentId: session.payment_intent,
-          },
-        });
-
-        // Decrement stock for each item
-        const order = await prisma.order.findUnique({
-          where: { id: orderId },
-          include: { items: true },
-        });
-        for (const item of order.items) {
-          await prisma.product.update({
-            where: { id: item.productId },
-            data: { stock: { decrement: item.quantity } },
+        // Atomically mark as PAID and decrement stock
+        await prisma.$transaction(async (tx) => {
+          await tx.order.update({
+            where: { id: orderId },
+            data: {
+              status: 'PAID',
+              stripePaymentIntentId: session.payment_intent,
+            },
           });
-        }
+
+          const order = await tx.order.findUnique({
+            where: { id: orderId },
+            include: { items: true },
+          });
+          for (const item of order.items) {
+            await tx.product.update({
+              where: { id: item.productId },
+              data: { stock: { decrement: item.quantity } },
+            });
+          }
+        });
         break;
       }
 
@@ -169,9 +171,24 @@ async function handleWebhook(req, res) {
         const charge = event.data.object;
         const paymentIntentId = charge.payment_intent;
         if (paymentIntentId) {
-          await prisma.order.updateMany({
-            where: { stripePaymentIntentId: paymentIntentId },
-            data: { status: 'REFUNDED' },
+          // Atomically mark order REFUNDED and restore stock
+          await prisma.$transaction(async (tx) => {
+            const orders = await tx.order.findMany({
+              where: { stripePaymentIntentId: paymentIntentId },
+              include: { items: true },
+            });
+            for (const order of orders) {
+              await tx.order.update({
+                where: { id: order.id },
+                data: { status: 'REFUNDED' },
+              });
+              for (const item of order.items) {
+                await tx.product.update({
+                  where: { id: item.productId },
+                  data: { stock: { increment: item.quantity } },
+                });
+              }
+            }
           });
         }
         break;
